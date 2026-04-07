@@ -15,16 +15,40 @@ Time range vocabulary to handle (not exhaustive):
 
 Default if nothing is given: last 24 hours (since=yesterday, until=today).
 
-## Step 2 — Fetch raw items
+## Step 2 — Fetch raw items via WebFetch
 
-Run via Bash:
+Fetch all sources **sequentially** (one WebFetch call at a time — do NOT parallelize). For each, extract items published within [since, until] UTC. Build a list of items with fields: `source`, `title`, `url`, `published`, `summary`, `authors`.
+
+**arXiv — 4 calls**
+
+For each row below, call WebFetch on:
 ```
-python scripts/fetch_items.py --since <since> --until <until>
+https://export.arxiv.org/api/query?search_query=cat:<CATEGORY>+AND+submittedDate:[<SINCE_DT>+TO+<UNTIL_DT>]&sortBy=submittedDate&sortOrder=descending&max_results=20
 ```
+where `<SINCE_DT>` = since date as `YYYYMMDD000000` (no hyphens, 14 digits) and `<UNTIL_DT>` = until date as `YYYYMMDD235959`.
 
-Capture stdout as a JSON array of items. Each item has: `source`, `title`, `url`, `published`, `summary`, `authors`, `affiliations`.
+| Source name | CATEGORY |
+|-------------|----------|
+| arxiv_lg    | cs.LG    |
+| arxiv_cl    | cs.CL    |
+| arxiv_ir    | cs.IR    |
+| arxiv_ai    | cs.AI    |
 
-Note any lines printed to stderr — these are warnings about failed sources. You will surface them in the final reply.
+Parse the Atom XML: each `<entry>` yields title, the `href` link where `type="text/html"`, `<published>`, `<summary>`, and `<author><name>` elements. Deduplicate across categories by URL.
+
+**RSS/Atom blog feeds — 5 calls**
+
+| Source name | URL |
+|-------------|-----|
+| google_ai   | https://blog.research.google/feeds/posts/default |
+| openai      | https://openai.com/news/rss.xml |
+| anthropic   | https://www.anthropic.com/news/rss.xml |
+| deepmind    | https://deepmind.google/blog/rss.xml |
+| huggingface | https://huggingface.co/blog/feed.xml |
+
+Parse each RSS/Atom XML: use `<item>` or `<entry>` elements, extracting title, link, `<pubDate>` or `<published>`, and description/summary. Include only items whose date falls within [since, until].
+
+**On any WebFetch failure**: note the source name and continue. List failures in the Appendix.
 
 ## Step 3 — Categorize
 
